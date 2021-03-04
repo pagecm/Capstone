@@ -38,6 +38,8 @@ function [MedianSolutions,MeanSolutions,UpperQuantileSolutions,LowerQuantileSolu
 %Set simulation parameter defaults
 defaultMaxTime = 6; %hours
 defaultPopulationSetting = 'Single Cell';
+defaultTempSwitch='off';
+defaultTemperature=37;
 defaultIFNSwitch = 'on';
 defaultVirResponse = 'on';
 defaultIFNStimulation = 'off'; 
@@ -67,6 +69,8 @@ HRVODEEvalparser = inputParser;
    validPosNumOrZero = @(x) isnumeric(x) && (x >= 0);
    validSwitchString = @(x) strcmpi(x,'on') || strcmpi(x,'') || strcmpi(x,'off');
    validPopulationString = @(x) strcmpi(x,'Single Cell') || strcmpi(x,'Population');
+   validTempSwitch= @(x) strcmpi(x,'on')|| strcmpi(x,'')|| strcmpi(x,'off');
+   validTemperature= @(x) isnumeric(x) && (x >= 0);
    validSensString = @(x) strcmpi(x,'Plus RNA') || strcmpi(x,'Minus RNA') || strcmpi(x,'dsRNA') || strcmpi(x,'RNA Ratio') ||...
        strcmpi(x,'Polyprotein') || strcmpi(x,'Virion') || strcmpi(x,'Empty Provirion') || strcmpi(x,'Other') || strcmpi(x,'');
    validChar = @(x) ischar(x);
@@ -79,6 +83,8 @@ HRVODEEvalparser = inputParser;
    addOptional(HRVODEEvalparser,'PopulationSetting',defaultPopulationSetting,validPopulationString);
    addOptional(HRVODEEvalparser,'MaxTime',defaultMaxTime,validPosNum);
    addOptional(HRVODEEvalparser,'IFNSwitch',defaultIFNSwitch,validSwitchString);
+   addOptional(HRVODEEvalparser,'TempSwitch',defaultTempSwitch,validTempSwitch);
+   addOptional(HRVODEEvalparser,'Temperature',defaultTemperature,validTemperature);
    addOptional(HRVODEEvalparser,'VirResponse',defaultVirResponse,validSwitchString);
    addOptional(HRVODEEvalparser,'IFNStimulation',defaultIFNStimulation,validSwitchString);
    addOptional(HRVODEEvalparser,'IFNStimulationTime',defaultIFNStimulationTime,validNum);
@@ -106,6 +112,8 @@ MOI = HRVODEEvalparser.Results.MOI;
 PopulationSetting = HRVODEEvalparser.Results.PopulationSetting;
 MaxTime = HRVODEEvalparser.Results.MaxTime;
 IFNSwitch = HRVODEEvalparser.Results.IFNSwitch;
+TempSwitch = HRVODEEvalparser.Results.TempSwitch;
+Temperature = HRVODEEvalparser.Results.Temperature;
 VirResponse = HRVODEEvalparser.Results.VirResponse;
 IFNStimulation = HRVODEEvalparser.Results.IFNStimulation;
 IFNStimulationTime = HRVODEEvalparser.Results.IFNStimulationTime;
@@ -183,80 +191,93 @@ k_transcribeISG = lognrnd(muFunc(170,(CV*170)^2),sigma); %(kb/h)
 RiboActive = 0.8; %Fraction 
 RiboTotal = 1e5; %Number
 PolysomeSize = 2.5; %Average polysome size. 
-TranslationRate = lognrnd(muFunc(3.5*3600,(CV*3.5*3600)^2),sigma); %(aa/h) 
-PolymeraseRate = lognrnd(muFunc(50*3600,(CV*50*3600)^2),sigma); %(bp/h)  
+TranslationRate = 3.5*3600;%lognrnd(muFunc(3.5*3600,(CV*3.5*3600)^2),sigma); %(aa/h) 
+PolymeraseRate = 50*3600;%lognrnd(muFunc(50*3600,(CV*50*3600)^2),sigma); %(bp/h)  
 HRVgenomelength = 7397; %(bp) 
 HRVpolyprolength = 2185; %(aa) 
 EncapsidatedNegStrandRatio = 1/1790; %Fraction
 
 %Receptor binding constants 
-k_on_ICAM = lognrnd(muFunc(2e5*3600/1e9,(CV*2e5*3600/1e9)^2),sigma); %(nM^-1 * h^-1)
-k_off_ICAM = lognrnd(muFunc(5e-7*3600,(CV*5e-7*3600)^2),sigma); %(h^-1) 
-k_internal = lognrnd(muFunc(16.56,(CV*16.56)^2),sigma); %(h^-1) 
-k_endo_escape = lognrnd(muFunc(420,(CV*420)^2),sigma); %(h^-1)  
+k_on_ICAM = 2e5*3600/1e9;%lognrnd(muFunc(2e7*3600/1e9,(CV*2e7*3600/1e9)^2),sigma); %(nM^-1 * h^-1)
+k_off_ICAM = 5e-7*3600;%lognrnd(muFunc(5e-7*3600,(CV*5e-7*3600)^2),sigma); %(h^-1) 
+k_internal = 16.56;%lognrnd(muFunc(16.56,(CV*16.56)^2),sigma); %(h^-1) 
+A_kinternal=1.621e13; %1/hr
+Ea_kinternal=17e3; %cal/mol
+k_endo_escape = 420;%lognrnd(muFunc(420,(CV*420)^2),sigma); %(h^-1)  
 InternalVolConv = CellSurfaceArea / (6.022e23 * HRVdiameter^2 * MaxHRVConc * CellCytVolume) * 1e30; %(dimensionless)
 
 %Replication constants 
 VROFormThreshold = 25; %(molecules)
-k_T_c_Form = lognrnd(muFunc(25/PolysomeSize,(CV*25/PolysomeSize)^2),sigma); %(h^-1 * nM^-1)
-k_Translate = TranslationRate * PolysomeSize / HRVpolyprolength; %(h^-1) 
-k_P_on = lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
-k_P_off = lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
-k_N_on = lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
-k_N_off = lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
+k_T_c_Form = 25/PolysomeSize;%lognrnd(muFunc(25/PolysomeSize,(CV*25/PolysomeSize)^2),sigma); %(h^-1 * nM^-1)
+A_kTcform=2.917e9; %1/hr*nM
+Ea_kTcform=12e3; %cal/mol
+k_Translate =TranslationRate * PolysomeSize / HRVpolyprolength; %(h^-1) 
+A_ktranslate=1.227e18; %1/hr
+Ea_ktranslate=24e3;%cal/mol
+k_P_on = 1;%lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
+k_P_off = 1;%lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
+k_N_on = 1;%lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
+k_N_off = 1;%lognrnd(muFunc(1,(CV*1)^2),sigma); %(h^-1) 
 VROVolConv = CellCytVolume/VROSurfaceVolume; %(dimensionless)
-k_R_Ip_Form = lognrnd(muFunc(0.36,(CV*0.36)^2),sigma); %(nM^-1 h^-1) 
+k_R_Ip_Form = .36;%lognrnd(muFunc(0.36,(CV*0.36)^2),sigma); %(nM^-1 h^-1) 
 k_N_Transcript = PolymeraseRate / HRVgenomelength; %(h^-1) 
 k_P_Transcript = PolymeraseRate / HRVgenomelength; %(h^-1) 
-k_R_In_Form = lognrnd(muFunc(0.36,(CV*0.36)^2),sigma); %(nM^-1 h^-1) 
-u_P_cyt = lognrnd(muFunc(0.23,(CV*0.23)^2),sigma); %(h^-1) 
-u_P_VRO = lognrnd(muFunc(0.23/VROVolConv,(CV*0.23/VROVolConv)^2),sigma); %(h^-1) 
-u_N_cyt = lognrnd(muFunc(0.23,(CV*0.23)^2),sigma); %(h^-1) 
-u_N_VRO = lognrnd(muFunc(0.23/VROVolConv,(CV*0.23/VROVolConv)^2),sigma); %(h^-1) 
+k_R_In_Form = .36;%lognrnd(muFunc(0.36,(CV*0.36)^2),sigma); %(nM^-1 h^-1) 
+u_P_cyt = .23;%lognrnd(muFunc(0.23,(CV*0.23)^2),sigma); %(h^-1) 
+u_P_VRO = .23/VROVolConv;%clognrnd(muFunc(0.23/VROVolConv,(CV*0.23/VROVolConv)^2),sigma); %(h^-1) 
+u_N_cyt = .01*.23;%lognrnd(muFunc(0.23,(CV*0.23)^2),sigma); %(h^-1) 
+u_N_VRO = .23/VROVolConv;%lognrnd(muFunc(0.23/VROVolConv,(CV*0.23/VROVolConv)^2),sigma); %(h^-1) 
 u_T_c = 0; %(h^-1) 
-u_VirProt_cyt = lognrnd(muFunc(0.05,(CV*0.05)^2),sigma); %(h^-1)
-u_VirProt_VRO = lognrnd(muFunc(0.05/VROVolConv,(CV*0.05/VROVolConv)^2),sigma); %(h^-1) 
+u_VirProt_cyt = .05;%lognrnd(muFunc(0.05,(CV*0.05)^2),sigma); %(h^-1)
+u_VirProt_VRO = .05/VROVolConv;%lognrnd(muFunc(0.05/VROVolConv,(CV*0.05/VROVolConv)^2),sigma); %(h^-1) 
 
 %Capsid assembly constants:
-k1f_cap = lognrnd(muFunc(3.6,(CV*3.6)^2),sigma); %(nM^-1 h^-1) 
-k1b_cap = lognrnd(muFunc(3.6e3,(CV*3.6e3)^2),sigma); %(h^-1) 
-k_Pentamer_on = lognrnd(muFunc(0.36,(CV*0.36)^2),sigma); %(nM^-1 h^-1)
-k_Pentamer_off = lognrnd(muFunc(36,(CV*36)^2),sigma); %(h^-1) 
-kRNACapBind = lognrnd(muFunc(3.6,(CV*3.6)^2),sigma); %(nM^-1 h^-1)
-kRNACapUnbind = lognrnd(muFunc(3.6e3,(CV*3.6e3)^2),sigma); %(h^-1) 
-k2f_cap = lognrnd(muFunc(3.6,(CV*3.6)^2),sigma); %(nM^-1 h^-1) 
-k2b_cap = lognrnd(muFunc(3.6e3,(CV*3.6e3)^2),sigma); %(h^-1) 
-u_cap_cyt = lognrnd(muFunc(0.05,(CV*0.05)^2),sigma); %(h^-1) 
-u_cap_VRO = lognrnd(muFunc(0.05/VROVolConv,(CV*0.05/VROVolConv)^2),sigma); %(h^-1) 
+k1f_cap = 3.6;%lognrnd(muFunc(3.6,(CV*3.6)^2),sigma); %(nM^-1 h^-1) 
+k1b_cap = 3.6e3;%lognrnd(muFunc(3.6e3,(CV*3.6e3)^2),sigma); %(h^-1) 
+A_k1bcap=1.584e45;%1/h
+Ea_k1bcap=59.034e3; %cal/mol
+k_Pentamer_on = .36;%lognrnd(muFunc(0.36,(CV*0.36)^2),sigma); %(nM^-1 h^-1)
+k_Pentamer_off = 36;%lognrnd(muFunc(36,(CV*36)^2),sigma); %(h^-1) 
+kRNACapBind = 3.6;%lognrnd(muFunc(3.6,(CV*3.6)^2),sigma); %(nM^-1 h^-1)
+kRNACapUnbind = 3.6e3;%lognrnd(muFunc(3.6e3,(CV*3.6e3)^2),sigma); %(h^-1) 
+A_kRNACapUnbind=1.584e45; %1/hr
+Ea_kRNACapUnbind=59.034e3; %cal/mol
+k2f_cap = 3.6;%lognrnd(muFunc(3.6,(CV*3.6)^2),sigma); %(nM^-1 h^-1) 
+k2b_cap = 3.6e3;%lognrnd(muFunc(3.6e3,(CV*3.6e3)^2),sigma); %(h^-1) 
+u_cap_cyt = 0.05;%lognrnd(muFunc(0.05,(CV*0.05)^2),sigma); %(h^-1) 
+u_cap_VRO = 0.05/VROVolConv;%lognrnd(muFunc(0.05/VROVolConv,(CV*0.05/VROVolConv)^2),sigma); %(h^-1) 
 
 %Feedback loop constants
-kcat_cleave = lognrnd(muFunc(0.3216*3600,(CV*0.3216*3600)^2),sigma); %(h^-1)
-Km_cleave = lognrnd(muFunc(960e3,(CV*960e3)^2),sigma); %(nM)
+kcat_cleave = .3216*3600;%lognrnd(muFunc(0.3216*3600,(CV*0.3216*3600)^2),sigma); %(h^-1)
+Km_cleave = 960e3;%lognrnd(muFunc(960e3,(CV*960e3)^2),sigma); %(nM)
 InitRibAvail = (1 - RiboActive) * RiboTotal / PolysomeSize / (6.022e23 * CellCytVolume) * 1e24; %(nM)
-kD_Hill = lognrnd(muFunc(1,(CV*1)^2),sigma); %(nM)
-n_Hill = lognrnd(muFunc(1.36,(CV*1.36)^2),sigma); %(dimensionless)
+kD_Hill = 1;%lognrnd(muFunc(1,(CV*1)^2),sigma); %(nM)
+n_Hill = 1.36;%lognrnd(muFunc(1.36,(CV*1.36)^2),sigma); %(dimensionless)
 ISGformRate = k_transcribeISG/ISGbpLength; %(h^-1)
+A_ISGformRate=1.091e18; %1/h
+Ea_ISGformRate=22e3; %cal/mol
 ISGBasal = 0; %(nM) 
-u_ISG = lognrnd(muFunc(0.1,(CV*0.1)^2),sigma); %(h^-1)
-EC50_Protease = lognrnd(muFunc(EC50_Protease,(CV*EC50_Protease)^2),sigma); %(nM)
-EC50_Translate = lognrnd(muFunc(EC50_Translate,(CV*EC50_Translate)^2),sigma); %(nM)
-OAS_RNAdeg = lognrnd(muFunc(5,(CV*5)^2),sigma); %(nM)
-EC50_RNAdeg = lognrnd(muFunc(EC50_RNAdeg,(CV*EC50_RNAdeg)^2),sigma); %(nM)
-EC50_DetectorDeg = lognrnd(muFunc(EC50_DetectorDeg,(CV*EC50_DetectorDeg)^2),sigma); %(nM)
-
-% Vary rates with respect to temperature
-R=1.986;
-T=30+273;
-A_on1=3.51872*10^8;
-A_on2=2.44909*10^9;
-A_diss=565.996;
-Ea_on1=6.91*10^3;
-Ea_on2=9.73*10^3;
-Ea_diss=3.39*10^3;
-e=2.71;
-k_on_ICAM= A_on1*e^(-Ea_on1/(R*T));
-k_on_ICAM2=A_on2*e^(-Ea_on2/(R*T));
-k_off_ICAM=A_diss*e^(-Ea_diss/(R*T));
+u_ISG = 0.1;%lognrnd(muFunc(0.1,(CV*0.1)^2),sigma); %(h^-1)
+A_uISG=4.982e11; %1/hr
+Ea_uISG=18e3; %calmol
+EC50_Protease =EC50_Protease;% lognrnd(muFunc(EC50_Protease,(CV*EC50_Protease)^2),sigma); %(nM)
+EC50_Translate = EC50_Translate;%lognrnd(muFunc(EC50_Translate,(CV*EC50_Translate)^2),sigma); %(nM)
+OAS_RNAdeg =5;% lognrnd(muFunc(5,(CV*5)^2),sigma); %(nM)
+EC50_RNAdeg = EC50_RNAdeg;%lognrnd(muFunc(EC50_RNAdeg,(CV*EC50_RNAdeg)^2),sigma); %(nM)
+EC50_DetectorDeg = EC50_DetectorDeg;%lognrnd(muFunc(EC50_DetectorDeg,(CV*EC50_DetectorDeg)^2),sigma); %(nM)
+%temperature
+if strcmpi(TempSwitch,'on')
+    R=1.986;
+    T=Temperature+273;
+    e=2.71;
+    k_internal=A_kinternal*e^(-(Ea_kinternal/(R*T)));
+    k_T_c_form=A_kTcform*e^(-(Ea_kTcform/(R*T)));
+    k_Translate=A_ktranslate*e^(-(Ea_ktranslate/(R*T)));
+    k1b_cap=A_k1bcap*e^(-(Ea_k1bcap/(R*T)));
+    kRNACapUnbind=A_kRNACapUnbind*e^(-(Ea_kRNACapUnbind/(R*T)));
+    u_ISG=A_uISG*e^(-(Ea_uISG/(R*T)));
+    ISGformRate=A_ISGformRate*e^(-(Ea_ISGformRate/(R*T)));
+end
 
 %Creates vector of all constants needed for rate equations. 
 Constants = [k_on_ICAM,k_off_ICAM,k_internal,InternalVolConv,k_endo_escape ...
@@ -285,6 +306,7 @@ else %Defaults to single-cell Mode
     uHRV = MOI * (HRVdiameter/1000)^2 / CellSurfaceArea * MaxHRVConc; %(nM) Unbound infectious HRV virions at cell surface
 end
 uHRV_Defective = ParticlePFUConv * uHRV; %(nM) Unbound defective HRV virions at cell surface
+
 
 %Receptors and Internalization
 uHRV_Defective = 0; %(nM) Unbound defective HRV virions in tight junctions
